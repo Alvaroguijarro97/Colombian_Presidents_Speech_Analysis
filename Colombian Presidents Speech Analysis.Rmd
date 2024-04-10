@@ -3,3 +3,1025 @@ title: "R Notebook"
 output: html_notebook
 ---
 
+```{r libraries}
+#install.packages("pdftools")
+#install.packages("SnowballC")
+library(pdftools)
+library(tm)
+library(topicmodels)
+library(SnowballC)
+```
+
+#Analysis for President Gavirira 1990-1994
+```{r}
+# Define the path to Gaviria's speeches
+gaviria_dir <- "C:/Users/alvar/OneDrive/Documents/GitHub/Colombian_Presidents_Speech_Analysis/GAVIRIA"
+
+# List all .txt files
+txt_files <- list.files(path = gaviria_dir, pattern = "\\.txt$", full.names = TRUE)
+```
+
+
+```{r}
+# Initialize an empty data frame for GAVIRIA
+gaviria_df <- data.frame(president = character(), title = character(), date = character(), text = character(), stringsAsFactors = FALSE)
+
+
+# Function to read and preprocess a text file
+read_and_preprocess_txt <- function(file_path) {
+  text <- tolower(readLines(file_path, warn = FALSE))
+  text <- paste(text, collapse = " ") # Combine lines
+  text <- removePunctuation(text)
+  text <- removeNumbers(text)
+  text <- removeWords(text, stopwords("spanish"))
+  text <- wordStem(text, language = "spanish") # Stemming for Spanish
+  text <- stripWhitespace(text)
+  return(text)
+}
+
+# Process each PDF file
+for(txt_path in txt_files) {
+  # Extract file name without extension
+  file_name <- tools::file_path_sans_ext(basename(txt_path))
+  title_date <- strsplit(file_name, "_")[[1]]
+  speech_date <- title_date[1]
+  speech_title <- paste(title_date[-1], collapse = "_")
+  
+  # Read and preprocess the PDF file
+  speech_text <- read_and_preprocess_txt(txt_path)
+  
+  # Append to GAVIRIA's data frame
+  gaviria_df <- rbind(gaviria_df, data.frame(president = 'GAVIRIA', title = speech_title, date = speech_date, text = paste(speech_text, collapse = " "), stringsAsFactors = FALSE))
+}
+
+# Read and preprocess all speeches for Gaviria
+gaviria_texts <- sapply(txt_files, read_and_preprocess_txt, USE.NAMES = FALSE)
+
+# Create a Corpus
+gaviria_corpus <- Corpus(VectorSource(gaviria_texts))
+
+```
+
+```{r}
+# Create a Document-Term Matrix
+dtm <- DocumentTermMatrix(gaviria_corpus)
+
+# Inspect the DTM
+inspect(dtm[1:5, 1:5]) # Just a snippet for sanity check
+```
+```{r}
+# Assuming 'dtm' is your Document-Term Matrix
+
+# Convert DTM to a matrix for easier manipulation
+dtm_matrix <- as.matrix(dtm)
+
+# Function to find top N words for a single document
+get_top_n_words <- function(dtm_row, n = 10) {
+  word_freq <- sort(dtm_row, decreasing = TRUE)
+  top_n_words <- names(word_freq)[1:n]
+  return(top_n_words)
+}
+
+# Initialize a list to store top words for each document
+top_words_per_doc_gaviria <- list()
+
+# Iterate over each document in DTM
+for (i in 1:nrow(dtm_matrix)) {
+  top_words_per_doc_gaviria[[i]] <- get_top_n_words(dtm_matrix[i, ], 10)
+}
+
+# Now, top_words_per_doc contains the top 10 words for each document
+# If you want to print the top 10 words for the first document, for example
+print(top_words_per_doc_gaviria[[1]])
+
+```
+
+```{r}
+# Define the number of topics
+num_topics <- 10 # Feel free to adjust based on your needs
+
+# Apply LDA model
+set.seed(123) # For reproducibility
+lda_model <- LDA(dtm, k = num_topics, control = list(seed = 123))
+
+# Inspect the topics
+topics <- terms(lda_model, 10)
+print(topics)
+
+```
+```{r explicacion de los temas de gaviria}
+# Create a data frame for topic interpretations
+topic_interpretations <- data.frame(
+  topic_number = 1:10,
+  title_of_topic = c("Infrastructure and Energy", "National Identity and Reform", 
+                     "Social Governance", "Security and Narcotraffic", 
+                     "Legislative and Social Rights", "Political Process and Violence",
+                     "Economic Development", "Constitutional and Democratic Renewal", 
+                     "Law Enforcement and Rights", "Democratic Reform and Governance"),
+  explanations = c(
+    "Focuses on sector-specific issues like energy ('energia'), problems ('problema'), and infrastructure projects ('proyecto'), suggesting discussions around energy rationing ('racionamiento') and infrastructure development.",
+    "Combines a sense of national identity ('colombia', 'colombianos') with the idea of reform ('reforma'), government actions ('gobierno'), and international perspectives ('internacional').",
+    "Emphasizes social aspects ('social'), government's role ('gobierno'), and financial dimensions ('millones'), indicating discussions on social policies and government spending.",
+    "Focuses on drug trafficking ('narcotráfico'), the fight against it ('lucha'), and justice ('justicia'), reflecting security concerns and law enforcement efforts.",
+    "Concerns with the country ('pais'), government legislation ('ley'), and social rights ('derechos'), pointing towards discussions on legal and social reforms.",
+    "Involves political processes ('politica', 'proceso'), democracy ('democracia'), and issues of violence ('violencia'), hinting at political discourse around peace and democracy.",
+    "Centers on development ('desarrollo'), economic plans ('plan'), and investment ('inversion'), indicating a focus on economic growth strategies.",
+    "Relates to the new constitution ('constitucion'), democratic values ('democracia'), and peace ('paz'), suggesting themes of constitutional reform and peacebuilding.",
+    "Focuses on police ('policia'), rights ('derechos'), and governance ('gobierno'), pointing towards discussions on law enforcement and human rights.",
+    "Emphasizes democracy ('democracia'), reform ('reforma'), and governance ('gobierno'), indicating discussions around democratic reforms and governance issues."
+  ),
+  stringsAsFactors = FALSE # Avoid converting strings to factors for compatibility with R versions below 4.0
+)
+
+# View the data frame
+print(topic_interpretations)
+
+```
+
+```{r}
+# Getting the topic probabilities for each document
+topic_probabilities <- posterior(lda_model)$topics
+
+# Convert probabilities to percentages
+topic_probabilities_percent <- topic_probabilities * 100
+
+# Round the percentages for better readability
+topic_probabilities_percent <- round(topic_probabilities_percent, 2)
+
+# Inspect the topic probabilities for the first few speeches as percentages
+topic_probabilities_percent
+
+# Finding the index of the dominant topic for each speech
+dominant_topic_index <- apply(topic_probabilities_percent, 1, which.max)
+
+# View the dominant topic index for the first few speeches
+head(dominant_topic_index)
+```
+```{r}
+# Create the dataset
+gaviria_dataset <- data.frame(
+  speech_title = gaviria_df$title,
+  speech_date = gaviria_df$date,
+  president_name = rep("GAVIRIA", length(dominant_topic_index)),
+  topic_of_speech = dominant_topic_index,
+  stringsAsFactors = FALSE
+)
+
+# Function to retrieve top ten words for a given topic index
+get_top_ten_words_for_topic <- function(topic_index) {
+  return(paste(topics[, topic_index], collapse = ", "))
+}
+
+# Add a column with the top ten words from the dominant topic for each speech
+gaviria_dataset$top_ten_words_topic <- sapply(dominant_topic_index, get_top_ten_words_for_topic)
+
+# Convert the list of top ten words per document into a character vector
+top_ten_words_vector <- sapply(top_words_per_doc_gaviria, function(x) paste(x, collapse = ", "))
+
+# Assign this vector as a new column in gaviria_dataset
+gaviria_dataset$top_ten_document_words <- top_ten_words_vector
+
+# View the first few rows of the dataset to confirm
+head(gaviria_dataset)
+
+```
+```{r}
+# Using match() to find corresponding titles for the topic_of_speech in gaviria_dataset
+gaviria_dataset$title_of_topic <- topic_interpretations$title_of_topic[
+  match(gaviria_dataset$topic_of_speech, topic_interpretations$topic_number)]
+
+# Now, gaviria_dataset includes the title_of_topic corresponding to each speech's dominant topic
+head(gaviria_dataset)
+```
+
+##Analysis for President Samper 1994-1998
+
+
+```{r}
+# Define the path to Gaviria's speeches
+samper_dir <- "C:/Users/alvar/OneDrive/Documents/GitHub/Colombian_Presidents_Speech_Analysis/SAMPER"
+
+# List all .txt files
+txt_files_2 <- list.files(path = samper_dir, pattern = "\\.txt$", full.names = TRUE)
+```
+
+```{r}
+# Initialize an empty data frame for GAVIRIA
+samper_df <- data.frame(president = character(), title = character(), date = character(), text = character(), stringsAsFactors = FALSE)
+
+# Process each PDF file
+for(txt_path in txt_files_2) {
+  # Extract file name without extension
+  file_name <- tools::file_path_sans_ext(basename(txt_path))
+  title_date <- strsplit(file_name, "_")[[1]]
+  speech_date <- title_date[1]
+  speech_title <- paste(title_date[-1], collapse = "_")
+  
+  # Read and preprocess the PDF file
+  speech_text <- read_and_preprocess_txt(txt_path)
+  
+  # Append to GAVIRIA's data frame
+  samper_df <- rbind(samper_df, data.frame(president = 'SAMPER', title = speech_title, date = speech_date, text = paste(speech_text, collapse = " "), stringsAsFactors = FALSE))
+}
+
+# Read and preprocess all speeches for Gaviria
+samper_texts <- sapply(txt_files_2, read_and_preprocess_txt, USE.NAMES = FALSE)
+
+# Create a Corpus
+samper_corpus <- Corpus(VectorSource(samper_texts))
+
+```
+
+```{r}
+# Create a Document-Term Matrix
+dtm_2 <- DocumentTermMatrix(samper_corpus)
+
+# Inspect the DTM
+inspect(dtm_2[1:5, 1:5]) # Just a snippet for sanity check
+```
+```{r}
+# Convert DTM to a matrix for easier manipulation
+dtm_matrix_2 <- as.matrix(dtm_2)
+
+# Function to find top N words for a single document
+get_top_n_words <- function(dtm_row, n = 10) {
+  word_freq <- sort(dtm_row, decreasing = TRUE)
+  top_n_words <- names(word_freq)[1:n]
+  return(top_n_words)
+}
+
+# Initialize a list to store top words for each document
+top_words_per_doc_samper <- list()
+
+# Iterate over each document in DTM
+for (i in 1:nrow(dtm_matrix_2)) {
+  top_words_per_doc_samper[[i]] <- get_top_n_words(dtm_matrix_2[i, ], 10)
+}
+
+# Now, top_words_per_doc contains the top 10 words for each document
+# If you want to print the top 10 words for the first document, for example
+print(top_words_per_doc_samper[[1]])
+
+```
+```{r}
+# Define the number of topics
+num_topics <- 10 # Feel free to adjust based on your needs
+
+# Apply LDA model
+set.seed(123) # For reproducibility
+lda_model_2 <- LDA(dtm_2, k = num_topics, control = list(seed = 123))
+
+# Inspect the topics
+topics <- terms(lda_model_2, 10)
+print(topics)
+```
+```{r}
+# Create a data frame for topic interpretations for President Samper
+samper_topic_interpretations <- data.frame(
+  topic_number = 1:10,
+  title_of_topic = c(
+    "Development and Social Policy",
+    "Government and Security",
+    "Women's Issues and Governance",
+    "Peace Process and Policy",
+    "Peace and Societal Rights",
+    "National Governance and Social Policy",
+    "Violence and Public Measures",
+    "Drug Policy and Narcotraffic",
+    "Colombia's International Relations",
+    "Global Movement and International Relations"
+  ),
+  explanations = c(
+    "Focuses on development ('desarrollo') and social ('social') aspects, highlighting government ('gobierno') strategies in social policy and planning.",
+    "Covers aspects related to the government ('gobierno'), security ('seguridad'), and the national order ('orden'), pointing to discussions around national security and presidential directives.",
+    "Highlights issues related to women ('mujeres'), national governance ('nacional'), and the president's involvement, suggesting emphasis on gender issues and governance.",
+    "Revolves around the peace process ('paz'), Colombia's political stance ('politica'), and legislative actions ('congreso'), indicating efforts towards peace and policy development.",
+    "Emphasizes peace ('paz'), rights ('derechos'), and government actions, reflecting on peace efforts and societal rights within the context of violence.",
+    "Discusses government role ('gobierno') in social ('social') policy, Colombian identity ('colombianos'), and political ('politica') outlook, reflecting on governance and social aspirations.",
+    "Centers on violence ('violencia'), government response ('gobierno'), and citizen ('ciudadana') safety measures, pointing to initiatives addressing public safety and violence.",
+    "Deals with political ('politica') views on drugs ('drogas') and narcotraffic ('narcotrafico'), indicating discussions on drug policy and efforts against narcotraffic.",
+    "Focuses on Colombia's role ('colombia') on the international stage, including the fight against drugs ('droga') and international relations ('relaciones'), highlighting global and diplomatic engagements.",
+    "Discusses global ('mundo') perspectives, movements ('movimiento'), and international relations ('paises'), suggesting a focus on global issues and Colombia's place in the world."
+  ),
+  stringsAsFactors = FALSE # Avoid converting strings to factors for compatibility with R versions below 4.0
+)
+
+# View the data frame
+print(samper_topic_interpretations)
+
+```
+```{r}
+# Getting the topic probabilities for each document
+topic_probabilities_samper <- posterior(lda_model_2)$topics
+
+# Convert probabilities to percentages
+topic_probabilities_percent_samper <- topic_probabilities_samper * 100
+
+# Round the percentages for better readability
+topic_probabilities_percent_samper <- round(topic_probabilities_percent_samper, 2)
+
+# Inspect the topic probabilities for the first few speeches as percentages
+topic_probabilities_percent_samper
+
+# Finding the index of the dominant topic for each speech
+dominant_topic_index_samper <- apply(topic_probabilities_percent_samper, 1, which.max)
+
+# View the dominant topic index for the first few speeches
+head(dominant_topic_index_samper)
+```
+```{r}
+# Create the dataset
+samper_dataset <- data.frame(
+  speech_title = samper_df$title,
+  speech_date = samper_df$date,
+  president_name = rep("SAMPER", length(dominant_topic_index_samper)),
+  topic_of_speech = dominant_topic_index_samper,
+  stringsAsFactors = FALSE
+)
+
+
+# Add a column with the top ten words from the dominant topic for each speech
+samper_dataset$top_ten_words_topic <- sapply(dominant_topic_index_samper, get_top_ten_words_for_topic)
+
+# Convert the list of top ten words per document into a character vector
+top_ten_words_vector_samper <- sapply(top_words_per_doc_samper, function(x) paste(x, collapse = ", "))
+
+# Assign this vector as a new column in gaviria_dataset
+samper_dataset$top_ten_document_words <- top_ten_words_vector_samper
+
+# View the first few rows of the dataset to confirm
+head(samper_dataset)
+```
+
+```{r}
+# Using match() to find corresponding titles for the topic_of_speech in samper_dataset
+samper_dataset$title_of_topic <- samper_topic_interpretations$title_of_topic[
+  match(samper_dataset$topic_of_speech, samper_topic_interpretations$topic_number)]
+
+# Now, samper_dataset includes the title_of_topic corresponding to each speech's dominant topic
+head(samper_dataset)
+```
+
+##Analysis for President Pastrana 1998-2002
+
+
+```{r}
+# Define the path to Pastrana's speeches
+pastrana_dir <- "C:/Users/alvar/OneDrive/Documents/GitHub/Colombian_Presidents_Speech_Analysis/PASTRANA"
+
+# List all .txt files
+txt_files_3 <- list.files(path = pastrana_dir, pattern = "\\.txt$", full.names = TRUE)
+```
+
+```{r}
+# Initialize an empty data frame for Pastrana
+pastrana_df <- data.frame(president = character(), title = character(), date = character(), text = character(), stringsAsFactors = FALSE)
+
+# Process each PDF file
+for(txt_path in txt_files_3) {
+  # Extract file name without extension
+  file_name <- tools::file_path_sans_ext(basename(txt_path))
+  title_date <- strsplit(file_name, "_")[[1]]
+  speech_date <- title_date[1]
+  speech_title <- paste(title_date[-1], collapse = "_")
+  
+  # Read and preprocess the PDF file
+  speech_text <- read_and_preprocess_txt(txt_path)
+  
+  # Append to Pastrana's data frame
+  pastrana_df <- rbind(pastrana_df, data.frame(president = 'PASTRANA', title = speech_title, date = speech_date, text = paste(speech_text, collapse = " "), stringsAsFactors = FALSE))
+}
+
+# Read and preprocess all speeches for PASTRANA
+pastrana_texts <- sapply(txt_files_3, read_and_preprocess_txt, USE.NAMES = FALSE)
+
+# Create a Corpus
+pastrana_corpus <- Corpus(VectorSource(pastrana_texts))
+
+```
+
+```{r}
+# Create a Document-Term Matrix
+dtm_3 <- DocumentTermMatrix(pastrana_corpus)
+
+# Inspect the DTM
+inspect(dtm_3[1:5, 1:5]) # Just a snippet for sanity check
+```
+
+```{r}
+# Convert DTM to a matrix for easier manipulation
+dtm_matrix_3 <- as.matrix(dtm_3)
+
+# Initialize a list to store top words for each document
+top_words_per_doc_pastrana <- list()
+
+# Iterate over each document in DTM
+for (i in 1:nrow(dtm_matrix_3)) {
+  top_words_per_doc_pastrana[[i]] <- get_top_n_words(dtm_matrix_3[i, ], 10)
+}
+
+# Now, top_words_per_doc contains the top 10 words for each document
+# If you want to print the top 10 words for the first document, for example
+print(top_words_per_doc_pastrana[[1]])
+
+```
+```{r}
+# Define the number of topics
+num_topics <- 10 # Feel free to adjust based on your needs
+
+# Apply LDA model
+set.seed(123) # For reproducibility
+lda_model_3 <- LDA(dtm_3, k = num_topics, control = list(seed = 123))
+
+# Inspect the topics
+topics <- terms(lda_model_3, 10)
+print(topics)
+```
+
+```{r}
+# Create a data frame for topic interpretations for President Pastrana
+pastrana_topic_interpretations <- data.frame(
+  topic_number = 1:10,
+  title_of_topic = c(
+    "National Vision and Peace Process",
+    "Economic Challenges and Unemployment",
+    "Corruption and Media",
+    "Social Policies and Peace",
+    "Government Action and Social Systems",
+    "International Affairs and Justice",
+    "Military Forces and Peace",
+    "Peace Negotiations with FARC",
+    "Peace and Societal Transformation",
+    "Today's Challenges and Colombian Identity"
+  ),
+  explanations = c(
+    "Focuses on Colombia's future ('colombia', 'nuevo') and the peace process ('paz'), reflecting on national aspirations and peace efforts.",
+    "Highlights economic concerns ('economia', 'desempleo') and the state of employment ('empleos', 'tasa'), indicating discussions on economic challenges and strategies to address unemployment.",
+    "Deals with issues of corruption ('corrupcion'), the role of the media ('medios'), and the influence of power ('poder'), suggesting a focus on corruption and its coverage.",
+    "Emphasizes social welfare ('social'), government responsibilities ('gobierno'), and employment ('empleo'), tying in with the broader context of peace ('paz') and social development.",
+    "Covers government initiatives ('gobierno'), social systems ('social', 'sistema'), and legislative actions ('congreso'), reflecting on the government's role in societal improvement.",
+    "Discusses Colombia's international stance ('internacional'), economic policies ('economia'), and justice ('justicia'), highlighting the government's approach to international affairs and economic justice.",
+    "Centers on the peace process ('paz') and the role of military forces ('fuerzas', 'armadas'), indicating discussions on peace efforts and military involvement.",
+    "Relates to peace negotiations ('paz') with the FARC, the challenges of violence ('violencia'), and the pursuit of a peaceful resolution.",
+    "Focuses on the peace process ('paz') and its impact on Colombian society ('colombianos', 'social'), suggesting a transformative vision for peace and societal change.",
+    "Touches on current issues ('hoy'), national identity ('colombianos', 'pais'), and governance challenges, reflecting on contemporary challenges and the Colombian spirit."
+  ),
+  stringsAsFactors = FALSE # Avoid converting strings to factors for compatibility with R versions below 4.0
+)
+
+# View the data frame
+print(pastrana_topic_interpretations)
+```
+
+```{r}
+# Getting the topic probabilities for each document
+topic_probabilities_pastrana <- posterior(lda_model_3)$topics
+
+# Convert probabilities to percentages
+topic_probabilities_percent_pastrana <- topic_probabilities_pastrana * 100
+
+# Round the percentages for better readability
+topic_probabilities_percent_pastrana <- round(topic_probabilities_percent_pastrana, 2)
+
+# Inspect the topic probabilities for the first few speeches as percentages
+topic_probabilities_percent_pastrana
+
+# Finding the index of the dominant topic for each speech
+dominant_topic_index_pastrana <- apply(topic_probabilities_percent_pastrana, 1, which.max)
+
+# View the dominant topic index for the first few speeches
+head(dominant_topic_index_pastrana)
+```
+
+```{r}
+# Create the dataset
+pastrana_dataset <- data.frame(
+  speech_title = pastrana_df$title,
+  speech_date = pastrana_df$date,
+  president_name = rep("PASTRANA", length(dominant_topic_index_pastrana)),
+  topic_of_speech = dominant_topic_index_pastrana,
+  stringsAsFactors = FALSE
+)
+
+
+# Add a column with the top ten words from the dominant topic for each speech
+pastrana_dataset$top_ten_words_topic <- sapply(dominant_topic_index_pastrana, get_top_ten_words_for_topic)
+
+# Convert the list of top ten words per document into a character vector
+top_ten_words_vector_pastrana <- sapply(top_words_per_doc_pastrana, function(x) paste(x, collapse = ", "))
+
+# Assign this vector as a new column in gaviria_dataset
+pastrana_dataset$top_ten_document_words <- top_ten_words_vector_pastrana
+
+# View the first few rows of the dataset to confirm
+head(pastrana_dataset)
+```
+
+```{r}
+# Using match() to find corresponding titles for the topic_of_speech in pastrana_dataset
+pastrana_dataset$title_of_topic <- pastrana_topic_interpretations$title_of_topic[
+  match(pastrana_dataset$topic_of_speech, pastrana_topic_interpretations$topic_number)]
+
+# Now, pastrana_dataset includes the title_of_topic corresponding to each speech's dominant topic
+head(pastrana_dataset)
+```
+
+##Analysis for President Uribe 2002-2010
+
+```{r}
+# Define the path to Uribe's speeches
+uribe_dir <- "C:/Users/alvar/OneDrive/Documents/GitHub/Colombian_Presidents_Speech_Analysis/URIBE"
+
+# List all .txt files
+txt_files_4 <- list.files(path = uribe_dir, pattern = "\\.txt$", full.names = TRUE)
+```
+
+```{r}
+# Initialize an empty data frame for Uribe
+uribe_df <- data.frame(president = character(), title = character(), date = character(), text = character(), stringsAsFactors = FALSE)
+
+# Process each PDF file
+for(txt_path in txt_files_4) {
+  # Extract file name without extension
+  file_name <- tools::file_path_sans_ext(basename(txt_path))
+  title_date <- strsplit(file_name, "_")[[1]]
+  speech_date <- title_date[1]
+  speech_title <- paste(title_date[-1], collapse = "_")
+  
+  # Read and preprocess the PDF file
+  speech_text <- read_and_preprocess_txt(txt_path)
+  
+  # Append to Uribe's data frame
+  uribe_df <- rbind(uribe_df, data.frame(president = 'URIBE', title = speech_title, date = speech_date, text = paste(speech_text, collapse = " "), stringsAsFactors = FALSE))
+}
+
+# Read and preprocess all speeches for URIBE
+uribe_texts <- sapply(txt_files_4, read_and_preprocess_txt, USE.NAMES = FALSE)
+
+# Create a Corpus
+uribe_corpus <- Corpus(VectorSource(uribe_texts))
+```
+
+
+```{r}
+# Create a Document-Term Matrix
+dtm_4 <- DocumentTermMatrix(uribe_corpus)
+
+# Inspect the DTM
+inspect(dtm_4[1:5, 1:5]) # Just a snippet for sanity check
+```
+
+```{r}
+# Convert DTM to a matrix for easier manipulation
+dtm_matrix_4 <- as.matrix(dtm_4)
+
+# Initialize a list to store top words for each document
+top_words_per_doc_uribe <- list()
+
+# Iterate over each document in DTM
+for (i in 1:nrow(dtm_matrix_4)) {
+  top_words_per_doc_uribe[[i]] <- get_top_n_words(dtm_matrix_4[i, ], 10)
+}
+
+# Now, top_words_per_doc contains the top 10 words for each document
+# If you want to print the top 10 words for the first document, for example
+print(top_words_per_doc_uribe[[1]])
+
+```
+
+```{r}
+# Define the number of topics
+num_topics <- 10 # Feel free to adjust based on your needs
+
+# Apply LDA model
+set.seed(123) # For reproducibility
+lda_model_4 <- LDA(dtm_4, k = num_topics, control = list(seed = 123))
+
+# Inspect the topics
+topics <- terms(lda_model_4, 10)
+print(topics)
+```
+
+```{r}
+# Create a data frame for topic interpretations for President Uribe
+uribe_topic_interpretations <- data.frame(
+  topic_number = 1:10,
+  title_of_topic = c(
+    "Trade Agreements and Economic Policy",
+    "Social Democracy and Governance",
+    "National Unity and Democratic Processes",
+    "Social Security and Economic Development",
+    "Public Security and Government Priorities",
+    "Justice and Social Efforts",
+    "Economic Investments and Public Welfare",
+    "National Identity and Leadership",
+    "Government and Insurgent Groups",
+    "Comprehensive Security Strategy"
+  ),
+  explanations = c(
+    "Emphasizes trade agreements ('tlc'), market ('mercado'), and the economic landscape ('economia'), reflecting Uribe's focus on strengthening Colombia's economy through international trade.",
+    "Deals with government action ('gobierno'), social policy ('social'), and democratic values ('democracia'), highlighting efforts towards social improvement and democratic governance.",
+    "Centers on national pride ('patria'), congressional actions ('congreso'), and democratic engagement ('democracia'), suggesting a call for unity and active participation in democratic processes.",
+    "Focuses on social welfare ('social'), security ('seguridad'), and economic indicators ('millones', 'inversion'), pointing towards initiatives aimed at social security and economic growth.",
+    "Discusses the government's role ('gobierno') in ensuring public security ('seguridad'), trust ('confianza'), and legislative involvement ('congreso'), reflecting prioritization of security and governance.",
+    "Highlights efforts towards justice ('justicia'), governmental responsibility ('gobierno'), and social endeavors ('social'), indicating a focus on justice reform and social equity.",
+    "Relates to economic investments ('inversion'), public welfare ('social'), and security policies ('seguridad'), emphasizing the government's commitment to economic development and public safety.",
+    "Touches on national identity ('colombia', 'compatriotas'), leadership ('uribe'), and security concerns ('seguridad'), illustrating Uribe's appeal to patriotism and his leadership stance.",
+    "Covers the government's stance against insurgent groups ('farc', 'terroristas'), policy against terrorism ('terrorismo'), and national security, reflecting the challenges of governance amid conflict.",
+    "Emphasizes a comprehensive approach to security ('seguridad'), social welfare ('social'), and investment ('inversion'), signifying a multi-faceted strategy for national development and stability."
+  ),
+  stringsAsFactors = FALSE # Avoid converting strings to factors for compatibility with R versions below 4.0
+)
+
+# View the data frame
+print(uribe_topic_interpretations)
+```
+
+```{r}
+# Getting the topic probabilities for each document
+topic_probabilities_uribe <- posterior(lda_model_4)$topics
+
+# Convert probabilities to percentages
+topic_probabilities_percent_uribe <- topic_probabilities_uribe * 100
+
+# Round the percentages for better readability
+topic_probabilities_percent_uribe <- round(topic_probabilities_percent_uribe, 2)
+
+# Inspect the topic probabilities for the first few speeches as percentages
+topic_probabilities_percent_uribe
+
+# Finding the index of the dominant topic for each speech
+dominant_topic_index_uribe <- apply(topic_probabilities_percent_uribe, 1, which.max)
+
+# View the dominant topic index for the first few speeches
+head(dominant_topic_index_uribe)
+```
+
+```{r}
+# Create the dataset
+uribe_dataset <- data.frame(
+  speech_title = uribe_df$title,
+  speech_date = uribe_df$date,
+  president_name = rep("URIBE", length(dominant_topic_index_uribe)),
+  topic_of_speech = dominant_topic_index_uribe,
+  stringsAsFactors = FALSE
+)
+
+
+# Add a column with the top ten words from the dominant topic for each speech
+uribe_dataset$top_ten_words_topic <- sapply(dominant_topic_index_uribe, get_top_ten_words_for_topic)
+
+# Convert the list of top ten words per document into a character vector
+top_ten_words_vector_uribe <- sapply(top_words_per_doc_uribe, function(x) paste(x, collapse = ", "))
+
+# Assign this vector as a new column in uribe_dataset
+uribe_dataset$top_ten_document_words <- top_ten_words_vector_uribe
+
+# View the first few rows of the dataset to confirm
+head(uribe_dataset)
+```
+
+```{r}
+# Using match() to find corresponding titles for the topic_of_speech in uribe_dataset
+uribe_dataset$title_of_topic <- uribe_topic_interpretations$title_of_topic[
+  match(uribe_dataset$topic_of_speech, uribe_topic_interpretations$topic_number)]
+
+# Now, uribe_dataset includes the title_of_topic corresponding to each speech's dominant topic
+head(uribe_dataset)
+```
+##Analysis for President Santos 2010-2018
+
+```{r}
+# Define the path to Uribe's speeches
+santos_dir <- "C:/Users/alvar/OneDrive/Documents/GitHub/Colombian_Presidents_Speech_Analysis/SANTOS"
+
+# List all .txt files
+txt_files_5 <- list.files(path = santos_dir, pattern = "\\.txt$", full.names = TRUE)
+```
+
+```{r}
+# Initialize an empty data frame for Santos
+santos_df <- data.frame(president = character(), title = character(), date = character(), text = character(), stringsAsFactors = FALSE)
+
+# Process each PDF file
+for(txt_path in txt_files_5) {
+  # Extract file name without extension
+  file_name <- tools::file_path_sans_ext(basename(txt_path))
+  title_date <- strsplit(file_name, "_")[[1]]
+  speech_date <- title_date[1]
+  speech_title <- paste(title_date[-1], collapse = "_")
+  
+  # Read and preprocess the PDF file
+  speech_text <- read_and_preprocess_txt(txt_path)
+  
+  # Append to Santos's data frame
+  santos_df <- rbind(santos_df, data.frame(president = 'SANTOS', title = speech_title, date = speech_date, text = paste(speech_text, collapse = " "), stringsAsFactors = FALSE))
+}
+
+# Read and preprocess all speeches for Santos
+santos_texts <- sapply(txt_files_5, read_and_preprocess_txt, USE.NAMES = FALSE)
+
+# Create a Corpus
+santos_corpus <- Corpus(VectorSource(santos_texts))
+```
+
+
+```{r}
+# Create a Document-Term Matrix
+dtm_5 <- DocumentTermMatrix(santos_corpus)
+
+# Inspect the DTM
+inspect(dtm_5[1:5, 1:5]) # Just a snippet for sanity check
+```
+
+```{r}
+# Convert DTM to a matrix for easier manipulation
+dtm_matrix_5 <- as.matrix(dtm_5)
+
+# Initialize a list to store top words for each document
+top_words_per_doc_santos <- list()
+
+# Iterate over each document in DTM
+for (i in 1:nrow(dtm_matrix_5)) {
+  top_words_per_doc_santos[[i]] <- get_top_n_words(dtm_matrix_5[i, ], 10)
+}
+
+# Now, top_words_per_doc contains the top 10 words for each document
+# If you want to print the top 10 words for the first document, for example
+print(top_words_per_doc_santos[[1]])
+
+```
+
+```{r}
+# Define the number of topics
+num_topics <- 10 # Feel free to adjust based on your needs
+
+# Apply LDA model
+set.seed(123) # For reproducibility
+lda_model_5 <- LDA(dtm_5, k = num_topics, control = list(seed = 123))
+
+# Inspect the topics
+topics <- terms(lda_model_5, 10)
+print(topics)
+```
+
+```{r}
+# Create a data frame for topic interpretations for President Santos
+santos_topic_interpretations <- data.frame(
+  topic_number = 1:10,
+  title_of_topic = c(
+    "National Progress and Peace Efforts",
+    "Social Equity and Development",
+    "International Relations and Legal Challenges",
+    "Rural Development and Global Integration",
+    "Victims and Social Justice",
+    "Government and Peace",
+    "National Achievements and Challenges",
+    "Peace and Societal Transformation",
+    "Peace Agreements and National Unity",
+    "Justice and Armed Forces"
+  ),
+  explanations = c(
+    "Focuses on Colombia's journey towards peace ('paz') and the overall vision for the country ('pais'), indicating a strong emphasis on peace efforts and national progress.",
+    "Covers the government's ('gobierno') role in promoting social ('social') equity and peace ('paz'), highlighting the commitment to social development and democratic values.",
+    "Deals with international challenges ('internacional'), court decisions ('corte', 'fallo'), and sovereignty issues ('archipielago'), reflecting on Colombia's navigation of international waters and legal hurdles.",
+    "Emphasizes rural ('rural') and agricultural development ('campo'), along with aspirations for OCDE membership, suggesting a focus on integrating rural development with global economic standards.",
+    "Centers on victims ('victimas') and the peace process ('paz'), underlining the laws ('ley') and agreements ('acuerdo') aimed at addressing the repercussions of conflict and fostering social justice.",
+    "Discusses the government's efforts ('gobierno') towards peace ('paz') and its international ('internacional') implications, underscoring economic ('economia') and justice ('justicia') reforms within the peace context.",
+    "Highlights the country's achievements ('pais', 'años') and ongoing challenges, with a focus on peace ('paz'), legislative reforms ('congreso'), and economic measures ('millones').",
+    "Focuses on peace efforts ('paz') and the transformative impact on Colombian society ('colombianos'), including the role of agreements ('acuerdo') and government action ('gobierno') in reshaping the national fabric.",
+    "Emphasizes the significance of peace agreements ('acuerdo') with armed groups ('farc') and the collective efforts towards national unity ('colombianos'), showcasing the drive for a unified and peaceful Colombia.",
+    "Deals with aspects of justice ('justicia'), military and police forces ('fuerzas'), and the broader implications for security ('seguridad') and societal order, reflecting on the complex relationship between justice and security forces in the peace process."
+  ),
+  stringsAsFactors = FALSE # Avoid converting strings to factors for compatibility with R versions below 4.0
+)
+
+# View the data frame
+print(santos_topic_interpretations)
+```
+
+```{r}
+# Getting the topic probabilities for each document
+topic_probabilities_santos <- posterior(lda_model_5)$topics
+
+# Convert probabilities to percentages
+topic_probabilities_percent_santos <- topic_probabilities_santos * 100
+
+# Round the percentages for better readability
+topic_probabilities_percent_santos <- round(topic_probabilities_percent_santos, 2)
+
+# Inspect the topic probabilities for the first few speeches as percentages
+topic_probabilities_percent_santos
+
+# Finding the index of the dominant topic for each speech
+dominant_topic_index_santos <- apply(topic_probabilities_percent_santos, 1, which.max)
+
+# View the dominant topic index for the first few speeches
+head(dominant_topic_index_santos)
+```
+
+```{r}
+# Create the dataset
+santos_dataset <- data.frame(
+  speech_title = santos_df$title,
+  speech_date = santos_df$date,
+  president_name = rep("SANTOS", length(dominant_topic_index_santos)),
+  topic_of_speech = dominant_topic_index_santos,
+  stringsAsFactors = FALSE
+)
+
+
+# Add a column with the top ten words from the dominant topic for each speech
+santos_dataset$top_ten_words_topic <- sapply(dominant_topic_index_santos, get_top_ten_words_for_topic)
+
+# Convert the list of top ten words per document into a character vector
+top_ten_words_vector_santos <- sapply(top_words_per_doc_santos, function(x) paste(x, collapse = ", "))
+
+# Assign this vector as a new column in santos_dataset
+santos_dataset$top_ten_document_words <- top_ten_words_vector_santos
+
+# View the first few rows of the dataset to confirm
+head(santos_dataset)
+```
+
+```{r}
+# Using match() to find corresponding titles for the topic_of_speech in santos_dataset
+santos_dataset$title_of_topic <- santos_topic_interpretations$title_of_topic[
+  match(santos_dataset$topic_of_speech, santos_topic_interpretations$topic_number)]
+
+# Now, santos_dataset includes the title_of_topic corresponding to each speech's dominant topic
+head(santos_dataset)
+```
+
+##Analysis for President Duque 2018-2022
+
+```{r}
+# Define the path to Uribe's speeches
+duque_dir <- "C:/Users/alvar/OneDrive/Documents/GitHub/Colombian_Presidents_Speech_Analysis/DUQUE"
+
+# List all .txt files
+txt_files_6 <- list.files(path = duque_dir, pattern = "\\.txt$", full.names = TRUE)
+```
+
+```{r}
+# Initialize an empty data frame for Duque
+duque_df <- data.frame(president = character(), title = character(), date = character(), text = character(), stringsAsFactors = FALSE)
+
+# Process each PDF file
+for(txt_path in txt_files_6) {
+  # Extract file name without extension
+  file_name <- tools::file_path_sans_ext(basename(txt_path))
+  title_date <- strsplit(file_name, "_")[[1]]
+  speech_date <- title_date[1]
+  speech_title <- paste(title_date[-1], collapse = "_")
+  
+  # Read and preprocess the PDF file
+  speech_text <- read_and_preprocess_txt(txt_path)
+  
+  # Append to Duque's data frame
+  duque_df <- rbind(duque_df, data.frame(president = 'DUQUE', title = speech_title, date = speech_date, text = paste(speech_text, collapse = " "), stringsAsFactors = FALSE))
+}
+
+# Read and preprocess all speeches for Duque
+duque_texts <- sapply(txt_files_6, read_and_preprocess_txt, USE.NAMES = FALSE)
+
+# Create a Corpus
+duque_corpus <- Corpus(VectorSource(duque_texts))
+```
+
+
+```{r}
+# Create a Document-Term Matrix
+dtm_6 <- DocumentTermMatrix(duque_corpus)
+
+# Inspect the DTM
+inspect(dtm_6[1:5, 1:5]) # Just a snippet for sanity check
+```
+
+```{r}
+# Convert DTM to a matrix for easier manipulation
+dtm_matrix_6 <- as.matrix(dtm_6)
+
+# Initialize a list to store top words for each document
+top_words_per_doc_duque <- list()
+
+# Iterate over each document in DTM
+for (i in 1:nrow(dtm_matrix_6)) {
+  top_words_per_doc_duque[[i]] <- get_top_n_words(dtm_matrix_6[i, ], 10)
+}
+
+# Now, top_words_per_doc contains the top 10 words for each document
+# If you want to print the top 10 words for the first document, for example
+print(top_words_per_doc_duque[[1]])
+
+```
+
+```{r}
+# Define the number of topics
+num_topics <- 10 # Feel free to adjust based on your needs
+
+# Apply LDA model
+set.seed(123) # For reproducibility
+lda_model_6 <- LDA(dtm_6, k = num_topics, control = list(seed = 123))
+
+# Inspect the topics
+topics <- terms(lda_model_6, 10)
+print(topics)
+```
+
+```{r}
+# Create a data frame for topic interpretations for President Duque
+duque_topic_interpretations <- data.frame(
+  topic_number = 1:10,
+  title_of_topic = c(
+    "National Milestones and Liberty",
+    "Youth and Society",
+    "National Goals and Unity",
+    "Health Crisis and Society",
+    "Government Dialogue and Peace",
+    "Political Landscape and Global Crisis",
+    "Security and Governance",
+    "Legislative Focus and Equity",
+    "National Strategy and Equity",
+    "Security and National Operation"
+  ),
+  explanations = c(
+    "Highlights current national events ('hoy', 'pais') and the celebration of the bicentennial ('bicentenario'), focusing on themes of liberty ('libertad') and historical reflection.",
+    "Addresses the role of society ('sociedad'), the youth ('jovenes'), and the nation ('nacion'), underscoring the importance of social values and the future generation.",
+    "Emphasizes the collective effort ('vamos') towards national unity ('colombia', 'pais') and the construction ('construir') of equity ('equidad'), showcasing a vision for national unity and progress.",
+    "Deals with the health crisis ('pandemia'), its social impact ('social'), and the government's response ('gobierno'), reflecting on the challenges posed by the pandemic to Colombian society.",
+    "Focuses on government initiatives ('gobierno'), dialogue ('conversacion'), and the pursuit of peace ('paz'), highlighting efforts towards reconciliation and societal healing.",
+    "Discusses Colombia's political stance ('politica') in the face of global challenges ('mundo', 'crisis'), including migration ('migratoria') and territorial integrity ('territorio'), indicating a focus on navigating global and national crises.",
+    "Covers topics related to security ('seguridad'), public policy ('politica'), and equitable development ('equidad'), emphasizing the government's approach to ensuring national security and promoting fairness.",
+    "Highlights the government's legislative priorities ('congresistas'), the pursuit of legality ('legalidad'), and the commitment to equity ('equidad'), pointing towards efforts in legal reform and social justice.",
+    "Emphasizes Colombia's approach to comprehensive national strategy ('colombia'), focusing on equity ('equidad') and the legal system ('legalidad'), suggesting a strategic focus on equitable governance and reform.",
+    "Centers on Colombia's security strategy ('seguridad'), highlighting the government's operational efforts ('operacion') and commitment to justice ('justicia'), reflecting on the challenges and initiatives in maintaining national security."
+  ),
+  stringsAsFactors = FALSE # Avoid converting strings to factors for compatibility with R versions below 4.0
+)
+
+# View the data frame
+print(duque_topic_interpretations)
+```
+
+```{r}
+# Getting the topic probabilities for each document
+topic_probabilities_duque <- posterior(lda_model_6)$topics
+
+# Convert probabilities to percentages
+topic_probabilities_percent_duque <- topic_probabilities_duque * 100
+
+# Round the percentages for better readability
+topic_probabilities_percent_duque <- round(topic_probabilities_percent_duque, 2)
+
+# Inspect the topic probabilities for the first few speeches as percentages
+topic_probabilities_percent_duque
+
+# Finding the index of the dominant topic for each speech
+dominant_topic_index_duque <- apply(topic_probabilities_percent_duque, 1, which.max)
+
+# View the dominant topic index for the first few speeches
+head(dominant_topic_index_duque)
+```
+
+```{r}
+# Create the dataset
+duque_dataset <- data.frame(
+  speech_title = duque_df$title,
+  speech_date = duque_df$date,
+  president_name = rep("DUQUE", length(dominant_topic_index_duque)),
+  topic_of_speech = dominant_topic_index_duque,
+  stringsAsFactors = FALSE
+)
+
+
+# Add a column with the top ten words from the dominant topic for each speech
+duque_dataset$top_ten_words_topic <- sapply(dominant_topic_index_duque, get_top_ten_words_for_topic)
+
+# Convert the list of top ten words per document into a character vector
+top_ten_words_vector_duque <- sapply(top_words_per_doc_duque, function(x) paste(x, collapse = ", "))
+
+# Assign this vector as a new column in duque_dataset
+duque_dataset$top_ten_document_words <- top_ten_words_vector_duque
+
+# View the first few rows of the dataset to confirm
+head(duque_dataset)
+```
+
+```{r}
+# Using match() to find corresponding titles for the topic_of_speech in duque_dataset
+duque_dataset$title_of_topic <- duque_topic_interpretations$title_of_topic[
+  match(duque_dataset$topic_of_speech, duque_topic_interpretations$topic_number)]
+
+# Now, duque_dataset includes the title_of_topic corresponding to each speech's dominant topic
+head(duque_dataset)
+```
+```{r}
+# Combine datasets
+all_presidents_dataset <- rbind(gaviria_dataset, samper_dataset, pastrana_dataset, uribe_dataset, santos_dataset, duque_dataset)
+
+# View the combined dataset
+head(all_presidents_dataset)
+
+```
+
