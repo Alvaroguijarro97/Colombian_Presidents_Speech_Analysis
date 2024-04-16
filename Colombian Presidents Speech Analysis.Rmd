@@ -10,6 +10,9 @@ library(pdftools)
 library(tm)
 library(topicmodels)
 library(SnowballC)
+library(dplyr)
+library(writexl)
+library(tidyr)
 ```
 
 #Analysis for President Gavirira 1990-1994
@@ -1022,6 +1025,72 @@ all_presidents_dataset <- rbind(gaviria_dataset, samper_dataset, pastrana_datase
 
 # View the combined dataset
 head(all_presidents_dataset)
+write_xlsx(all_presidents_dataset, "Presidents_Topic_Analysis_1994-2022.xlsx")
+
+```
+Freceuncy of terms:
+```{r}
+presidents_speeches <- bind_rows(gaviria_df, samper_df, pastrana_df, uribe_df, santos_df, duque_df)
+presidents_speech_vector <- presidents_speeches$text
+
+# Create a Corpus
+presidents_corpus <- Corpus(VectorSource(presidents_speech_vector))
+```
+
+
+```{r}
+# Create a Document-Term Matrix
+dtm_7 <- DocumentTermMatrix(presidents_corpus)
+
+# Inspect the DTM
+inspect(dtm_7[1:5, 1:5]) # Just a snippet for sanity check
+```
+```{r}
+# Get the matrix terms (unique list of words)
+terms_list <- Terms(dtm_7)
+
+# Correctly sum of frequencies for each term across all documents
+term_frequencies <- colSums(as.matrix(dtm_7))
+
+# Convert to a data frame correctly
+terms_df <- data.frame(term = terms_list, frequency = term_frequencies)
+
+# Export to Excel with corrected frequencies
+write_xlsx(terms_df, "Terms_and_Frequencies_Corrected.xlsx")
+```
+
+```{r}
+# Assuming presidents_speeches is your data frame and it includes a 'president' column
+
+# Create a Corpus with metadata
+corpus_with_meta <- VCorpus(VectorSource(presidents_speeches$text))
+
+# Adding metadata (e.g., president names) to each document in the corpus
+mapply(function(doc, president) meta(doc, "president") <- president,
+       doc = corpus_with_meta, president = presidents_speeches$president)
+
+# Create a Document-Term Matrix
+dtm_with_meta <- DocumentTermMatrix(corpus_with_meta,
+                                    control = list(weighting = weightTfIdf, 
+                                                   removePunctuation = TRUE,
+                                                   stopwords = TRUE))
+
+# Convert DTM to a data frame for easier manipulation
+dtm_df <- as.data.frame(as.matrix(dtm_with_meta))
+
+# Add the president names as a column to this data frame
+dtm_df$president <- sapply(corpus_with_meta, function(x) meta(x, "president"))
+
+# Now you can calculate frequencies for each term by president. For example:
+term_frequencies_by_president <- dtm_df %>%
+  group_by(president) %>%
+  summarise(across(-president, sum, na.rm = TRUE)) %>%
+  pivot_longer(-president, names_to = "term", values_to = "frequency")
+
+# This creates a data frame with columns for president, term, and frequency
+
+# Optionally, filter for specific terms or export to Excel
+# writexl::write_xlsx(term_frequencies_by_president, "Term_Frequencies_by_President.xlsx")
 
 ```
 
